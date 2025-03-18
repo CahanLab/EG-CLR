@@ -51,6 +51,64 @@ def subset_adata_by_chromosome(adata, chromosome_num):
 
     return adata_subset
 
+
+
+ # normalize one chromosome's data
+def normalize_by_chromasome(adata_rna, original_adata):
+    
+    # extract selected gene and cells 
+    original_adata = original_adata[original_adata.obs.index.isin(adata_rna.obs.index)]
+    original_adata = original_adata[:,original_adata.var.index.isin(adata_rna.var.index)]
+
+    # transfer var 
+    new_adata = ad.AnnData(X=original_adata.X.copy(), obs=adata_rna.obs.copy(), var=adata_rna.var.copy())
+
+    # Normalization
+    sc.pp.normalize_total(new_adata, target_sum=1e4)
+    sc.pp.log1p(new_adata)
+    
+    return new_adata
+
+
+# normalize all chromsome's data
+def normalize_all_chromasome(adata_rna, orginal_count_path, chr_num, chr_y = False):
+    
+    # get orginal mRNA counts 
+    original_adata = sc.read_10x_mtx(orginal_count_path, gex_only = False)
+        
+    # separate RNA and ATAC data 
+    gex_rows = list(map(lambda x: x == 'Gene Expression', original_adata.var['feature_types']))
+    original_adata = original_adata[:, gex_rows]
+    
+    # make variables unique
+    original_adata.var_names_make_unique()
+    
+    # make a new dict to store result
+    normalized_all_chr = {}
+    
+    # normalize by chr # 
+    for i in range(1, chr_num + 1):
+        chromosome_subsets = subset_adata_by_chromosome(adata_rna,i)
+        new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
+        
+        normalized_all_chr[f'chr{i}'] = new_adata
+        
+    # normalize chrX
+    chromosome_subsets = subset_adata_by_chromosome(adata_rna,-1)
+    new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
+    normalized_all_chr['chrX'] = new_adata
+    
+    # normalize chrY
+    if (chr_y == True):
+        chromosome_subsets = subset_adata_by_chromosome(adata_rna,-2)
+        new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
+        normalized_all_chr['chrY'] = new_adata
+    
+    return normalized_all_chr
+
+
+
+
 # Calculate the Mutual Information score for gene expressions and chromatin accessbility 
 def MI_Matrix(adata_atac, adata_rna):
     
