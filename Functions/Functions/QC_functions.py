@@ -8,6 +8,17 @@ from muon import prot as pt
 import anndata as ad
 import random
 random.seed(10)
+import pickle
+import anndata as ad
+
+
+import pySingleCellNet as pySCN
+# pip install git+https://github.com/pcahan1/PySingleCellNet.
+
+
+# limit to only chr values 
+def limit_to_Chr(adata, key = 'Chromosome', char = 'chr'):
+    return adata[:,adata.var[key].str.startswith(char,na=False)]
 
 # limit adata to the shared cells 
 def find_common_cell(adata_rna, adata_atac):
@@ -195,6 +206,42 @@ def separate_GRE_gene(atac,asisgn_peak_name = 'peak_category', peak = "peak_type
     return  adata_CRE, adata_gene
 
 
-# limit to only chr values 
-def limit_to_Chr(adata, key = 'Chromosome', char = 'chr'):
-    return adata[:,adata.var[key].str.startswith(char,na=False)]
+### RNA processing functions
+
+# given rna adata, compute average for each cell with  "n_counts" and "n_genes"
+# for each gene in each cell, if gene mRNA count > average, save orginal values
+# if mRNA count < avereage, save 0
+def define_above_baseline_gene(adata):
+    
+    # Calculate n_counts: total counts per cell (sum of all gene counts per cell)
+    adata.obs['n_counts'] = adata.X.sum(axis=1)
+
+    # Calculate n_genes: number of non-zero gene counts per cell (number of expressed genes)
+    adata.obs['n_genes'] = (adata.X > 0).sum(axis=1)
+    
+    # computer average
+    average_mrna_counts = adata.obs['n_counts']/adata.obs['n_genes']
+    avg_mrna_per_cell = average_mrna_counts.values
+
+    # perform gene baseline limitation
+    expression_matrix = adata.X.toarray()
+    new_expression_matrix = np.where(expression_matrix > avg_mrna_per_cell[:, None], expression_matrix, 0)
+    
+    new_adata = ad.AnnData(X=new_expression_matrix, obs=adata.obs.copy(), var=adata.var.copy())
+    
+    return new_adata
+
+
+
+# write CLR matrixes into pickle file
+def write_matrixes(file_name, matrixes):
+    with open(f'{file_name}.pkl', 'wb') as f:
+        pickle.dump(matrixes, f)
+
+
+# load CLR matrixes pickle file
+def load_matrxies(file_name):
+    with open(file_name, 'rb') as file:
+        matrixes = pickle.load(file)
+    return matrixes
+
