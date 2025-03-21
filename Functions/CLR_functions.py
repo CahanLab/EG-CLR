@@ -1,10 +1,4 @@
-import random
-random.seed(10)
-from sklearn.preprocessing import KBinsDiscretizer
-from sklearn.metrics import normalized_mutual_info_score
-from sklearn.feature_selection import mutual_info_regression
-from scipy import stats
-import pybedtools
+
 
 from .QC_functions import *
 

@@ -1,4 +1,4 @@
-import pybedtools
+from .QC_functions import *
 
 
 ### verfication
