@@ -16,9 +16,19 @@ import pySingleCellNet as pySCN
 # pip install git+https://github.com/pcahan1/PySingleCellNet.
 
 
+# ---------------------------------------------Utils Functions------------------------------------------------
+
 # limit to only chr values 
 def limit_to_Chr(adata, key = 'Chromosome', char = 'chr'):
     return adata[:,adata.var[key].str.startswith(char,na=False)]
+
+
+
+
+
+# ---------------------------------------------Utils Functions------------------------------------------------
+
+
 
 # limit adata to the shared cells 
 def find_common_cell(adata_rna, adata_atac):
