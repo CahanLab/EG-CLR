@@ -22,11 +22,6 @@ from scipy import stats
 
 # ---------------------------------------------Utils Functions------------------------------------------------
 
-# limit to only chr values for atac peaks
-def limit_to_Chr(adata, key = 'Chromosome', char = 'chr'):
-    return adata[:,adata.var[key].str.startswith(char,na=False)]
-
-
 # limit adata to the shared cells 
 def find_common_cell(adata_rna, adata_atac):
     
@@ -38,12 +33,17 @@ def find_common_cell(adata_rna, adata_atac):
     common_cells = b.intersection(a)    
     
     # select cells
-    adata_common_RNA = adata_rna[common_cells]
-    adata_common_ATAC = adata_atac[common_cells]
+    adata_common_RNA = adata_rna[common_cells].copy()
+    adata_common_ATAC = adata_atac[common_cells].copy()
     
     print("adata_RNA:",len(adata_common_RNA), ", adata_ATAC:", len(adata_common_ATAC) )
     
     return adata_common_RNA, adata_common_ATAC
+
+# limit to only chr values for atac peaks
+def limit_to_Chr(adata, key = 'Chromosome', char = 'chr'):
+    return adata[:,adata.var[key].str.startswith(char,na=False)].copy()
+
 
 
 # limit adata to the shared genes 
