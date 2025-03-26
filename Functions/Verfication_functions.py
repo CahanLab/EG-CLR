@@ -1,21 +1,24 @@
-from .QC_functions import *
+import pandas as pd
+from muon import atac as ac
+from muon import prot as pt
+import anndata as ad
+import random
+random.seed(10)
+import pybedtools
 
 
 ### verfication
 
+#TODO: limit the the range of the cCREs
+
+#TODO: Return the E-G pair 
+
+
+
+
 
 # find overlaps between two bed file ( but in df format)
 def count_overlapping_peaks(test_df, reference_df):
-    """
-    Counts how many peaks from reference_df overlap with test_df using pybedtools.
-    
-    Parameters:
-    test_df (pd.DataFrame): Test DataFrame with columns ['chr', 'start', 'end']
-    reference_df (pd.DataFrame): Reference DataFrame with columns ['chr', 'start', 'end']
-    
-    Returns:
-    int: The number of overlapping peaks from reference_df with test_df
-    """
     
     # Convert test_df and reference_df into pybedtools BedTool objects
     test_bed = pybedtools.BedTool.from_dataframe(test_df)

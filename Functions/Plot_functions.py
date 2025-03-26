@@ -1,5 +1,6 @@
-from .QC_functions import *
-
+import matplotlib.pyplot as plt
+import random
+random.seed(10)
 
 ### plot
 

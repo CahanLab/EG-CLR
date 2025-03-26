@@ -44,7 +44,7 @@ def find_common_cell(adata_rna, adata_atac):
 def limit_to_Chr(adata, key = 'Chromosome', char = 'chr'):
     return adata[:,adata.var[key].str.startswith(char,na=False)].copy()
 
-
+# --------- checked ----------------
 
 # limit adata to the shared genes 
 def find_common_gene(adata_rna, adata_atac, rna_key, atac_key):

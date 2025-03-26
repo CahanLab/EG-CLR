@@ -1,10 +1,23 @@
-
-
-from .QC_functions import *
-
-
 ### CLR functions
-
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import muon as mu
+import matplotlib.pyplot as plt
+from muon import atac as ac
+from muon import prot as pt
+import anndata as ad
+import random
+random.seed(10)
+from scipy import sparse
+import anndata as ad
+import pySingleCellNet as pySCN # pip install git+https://github.com/pcahan1/PySingleCellNet.
+import random
+random.seed(10)
+from sklearn.preprocessing import KBinsDiscretizer
+from sklearn.metrics import normalized_mutual_info_score
+from sklearn.feature_selection import mutual_info_regression
+from scipy import stats
 
 
 # isolate gene by chromosome. 
