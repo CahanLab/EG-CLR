@@ -22,7 +22,8 @@ from scipy import stats
 
 # ---------------------------------------------Utils Functions------------------------------------------------
 
-# limit adata to the shared cells 
+
+# limit adata to the shared cells #
 def find_common_cell(adata_rna, adata_atac):
     
     # obtain adata cell names
@@ -40,11 +41,11 @@ def find_common_cell(adata_rna, adata_atac):
     
     return adata_common_RNA, adata_common_ATAC
 
-# limit to only chr values for atac peaks
+
+# limit to only chr values for atac peaks #
 def limit_to_Chr(adata, key = 'Chromosome', char = 'chr'):
     return adata[:,adata.var[key].str.startswith(char,na=False)].copy()
 
-# --------- checked ----------------
 
 # limit adata to the shared genes 
 def find_common_gene(adata_rna, adata_atac, rna_key, atac_key):
@@ -117,7 +118,6 @@ def df_gene_chromosome(adata):
     return var_df
 
 
-
 # write CLR matrixes into pickle file
 def write_matrixes(file_name, matrixes):
     with open(f'{file_name}.pkl', 'wb') as f:
@@ -140,11 +140,11 @@ def load_matrxies(file_name):
 # ---------------------------------------------ATAC-preprocessing Functions------------------------------------------------
 
 
-# sign chromosome location to gene by taking peak_annotation.tsv
+# sign chromosome location to gene by taking feature.tsv.gz from filter/raw matrix folder #
 def assign_chr(path, adata):
     
     # Load the full features.tsv file including all columns
-    features_df = pd.read_csv(path, header=None, sep='\t')
+    features_df = pd.read_csv(path, header=None, sep='\t',compression="gzip")
     features_df.columns = ['gene_ids', 'gene_symbols', 'feature_type', 'Chromosome', 'Start', 'End']
     features_df.set_index("gene_ids", inplace=True)
     
@@ -161,7 +161,7 @@ def assign_chr(path, adata):
     return adata
 
 
-# Take in both 10X feature.tsv and peak_annotation.tsv. Transfer Chromosome, Start, End, 
+# Take in both 10X feature.tsv and peak_annotation.tsv. Transfer Chromosome, Start, End #
 def assign_loc(feature_path, annotation_path, adata):
     
     # Load the full features.tsv and atac_peak_annotation.tsv file 
@@ -205,32 +205,34 @@ def assign_loc(feature_path, annotation_path, adata):
 
     return adata
 
+
 # separate gene, promotor, CRE for atac data
 def separate_GRE_gene_promotor(atac,asisgn_peak_name = 'peak_category', peak = "peak_type",distance = 'distance'):
     
     
     # first separate gene + promotor into gene, other peaks into CRE
     atac.var[asisgn_peak_name] = pd.Series([""] * atac.var.shape[0])
-    atac.var[asisgn_peak_name] = atac.var[distance].apply(lambda x: 'gene' if x == 0.0 else 'CRE')
+    atac.var[asisgn_peak_name] = atac.var[distance].apply(lambda x: 'gene' if x == 0.0 else 'CRE').copy()
     
     # Create a boolean mask based on the condition
     cre_mask = atac.var[asisgn_peak_name] == 'CRE'
     gene_mask = atac.var[asisgn_peak_name] == 'gene'
 
     # Use the mask to subset the AnnData object
-    adata_CRE = atac[:, cre_mask]
-    adata_gene = atac[:, gene_mask]
+    adata_CRE = atac[:, cre_mask].copy()
+    adata_gene = atac[:, gene_mask].copy()
     
     
     # from gene+promotor, 
     promotor_mask = adata_gene.var[peak] == "promoter"
     gene_mask = adata_gene.var[peak] == "distal"
 
-    adata_promotor = adata_gene[:, promotor_mask]
-    adata_promotor.var[asisgn_peak_name] = adata_promotor.var[peak]
-    adata_gene = adata_gene[:, gene_mask]
+    adata_promotor = adata_gene[:, promotor_mask].copy()
+    adata_promotor.var[asisgn_peak_name] = adata_promotor.var[peak].copy()
+    adata_gene = adata_gene[:, gene_mask].copy()
     
     return  adata_CRE, adata_gene, adata_promotor
+
 
 # separate gene, promotor, CRE for atac data
 def separate_GRE_gene(atac,asisgn_peak_name = 'peak_category', peak = "peak_type",distance = 'distance'):
@@ -251,7 +253,7 @@ def separate_GRE_gene(atac,asisgn_peak_name = 'peak_category', peak = "peak_type
     return  adata_CRE, adata_gene
 
 
-# find gene that is both accessible and expressing
+# find gene that is both accessible and expressing in each cell #
 def define_open_express_gene(adata_rna, adata_atac, rna_key = "var_names", atac_key = "gene"):
     
     adata_CRE, adata_gene, adata_promoter = separate_GRE_gene_promotor(adata_atac)

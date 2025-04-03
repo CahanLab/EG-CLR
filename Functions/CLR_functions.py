@@ -17,11 +17,12 @@ random.seed(10)
 from sklearn.preprocessing import KBinsDiscretizer
 from sklearn.metrics import normalized_mutual_info_score
 from sklearn.feature_selection import mutual_info_regression
+from sklearn.feature_selection import mutual_info_classif
 from scipy import stats
 
 
 # isolate gene by chromosome. 
-# -1 is for chrX, -2 is for chrY, any positive number is for chr#. 
+# -1 is for chrX, -2 is for chrY, any positive number is for chr#. # 
 def subset_adata_by_chromosome(adata, chromosome_num):
     
     # Convert the chromosome number to its corresponding chromosome label
@@ -95,7 +96,6 @@ def normalize_all_chromasome(adata_rna, orginal_count_path, chr_num, chr_y = Fal
     return normalized_all_chr
 
 
-
 # Calculate the Mutual Information score for gene expressions and chromatin accessbility 
 def MI_Matrix(adata_atac, adata_rna):
     
@@ -111,11 +111,11 @@ def MI_Matrix(adata_atac, adata_rna):
     atac_df = pd.DataFrame(atac_access, index=adata_atac.obs_names, columns=adata_atac.var_names)
     
     # normalize by KBinsDiscretizer
-    est=KBinsDiscretizer(n_bins=int(np.sqrt(atac_df.shape[1])),encode='ordinal',strategy="uniform")
+    est=KBinsDiscretizer(n_bins=int(np.sqrt(atac_df.shape[1])),encode='ordinal',strategy="quantile")
     est.fit(atac_df)
     dataset_atac=est.transform(atac_df)
 
-    est=KBinsDiscretizer(n_bins=int(np.sqrt(rna_df.shape[1])),encode='ordinal',strategy="uniform")
+    est=KBinsDiscretizer(n_bins=int(np.sqrt(rna_df.shape[1])),encode='ordinal',strategy="quantile")
     est.fit(rna_df)
     dataset_rna=est.transform(rna_df)
     
@@ -129,13 +129,47 @@ def MI_Matrix(adata_atac, adata_rna):
     # Calculate mutual information for each pair of columns
     for i in range(n_cols_rna):
         for j in range(n_cols_atac):
-                mi_matrix[i, j] = normalized_mutual_info_score(dataset_rna[:, i], dataset_atac[:, j])
+                mi_matrix[i, j] = mutual_info_score(dataset_rna[:, i], dataset_atac[:, j])
                
     # convert to df  
     gene_names = adata_rna.var_names
     peak_names = adata_atac.var["gene_ids"]
                 
     return mi_matrix
+
+
+# Calculate the Mutual Information score for gene expressions and chromatin accessbility 
+def MI_Matrix_MIinfoClassif(adata_atac, adata_rna):
+    
+    if adata_atac.n_obs != adata_rna.n_obs:
+        print("The two datasets do not have the same number of cells.")
+        return  # Exit the function early
+    
+    # convert rna and atac adata object to dataframe 
+    rna_expression = adata_rna.X.toarray()
+    atac_access = adata_atac.X.toarray() 
+    atac_access = (atac_access > 0).astype(int)   
+    
+    # calculate MI matrix 
+    n_cols_rna = rna_expression.shape[1]  #number of gene
+    n_cols_atac = atac_access.shape[1]  #number of peak
+
+    # Initialize the mutual information matrix
+    mi_matrix = np.zeros((n_cols_rna, n_cols_atac))
+
+    # Calculate mutual information for each pair of columns
+    for i in range(n_cols_rna):
+        rna = rna_expression[:,i].reshape(-1, 1)
+        for j in range(n_cols_atac):
+                atac = atac_access[:, j]
+                mi = mutual_info_classif(rna, atac, discrete_features = False)
+                mi_matrix[i, j] = mi[0]
+               
+    # convert to df  
+    mi_df = pd.DataFrame(mi_matrix, index=adata_rna.var_names, columns=adata_atac.var_names)
+                
+    return mi_df
+
 
 # Computer z-score matrix from MI matrix
 def CLR_Matrix(mi_matrix):

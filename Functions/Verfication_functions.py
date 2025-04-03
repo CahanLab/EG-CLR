@@ -11,11 +11,24 @@ import pybedtools
 
 #TODO: limit the the range of the cCREs
 
-#TODO: Return the E-G pair 
 
+# This function takes a gene name and a CLR matrix, and returns a DataFrame containing the CLR values for the specified genes.
+def EG_pair_by_name(gene, CLR_Matrix):
+    
+    if gene not in CLR_Matrix.columns:
+        print(f"Warning: {gene} not found in CLR matrix.")
+    else:
+        EG_pair = CLR_Matrix[gene].copy()
+        EG_pair = EG_pair[EG_pair > 0]
+        #GATA1_EG_pair = GATA1_EG_pair.reset_index()
+        
+        
+        #GATA1_EG_pair.columns = ['Peak', 'CLR_value']
+        GATA1_EG_pair = EG_pair.index.str.extract(r'^(chr\w+):(\d+)-(\d+)$')
+        GATA1_EG_pair.columns = ['chr', 'start', 'end']
 
-
-
+    
+        return GATA1_EG_pair
 
 # find overlaps between two bed file ( but in df format)
 def count_overlapping_peaks(test_df, reference_df):
