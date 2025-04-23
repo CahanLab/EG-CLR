@@ -16,6 +16,7 @@ import random
 random.seed(10)
 from sklearn.preprocessing import KBinsDiscretizer
 from sklearn.metrics import normalized_mutual_info_score
+from sklearn.metrics import mutual_info_score
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.feature_selection import mutual_info_classif
 from scipy import stats
