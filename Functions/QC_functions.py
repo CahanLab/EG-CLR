@@ -206,7 +206,7 @@ def assign_loc(feature_path, annotation_path, adata):
     return adata
 
 
-# separate gene, promotor, CRE for atac data
+# separate gene, promotor, CRE for atac data #
 def separate_GRE_gene_promotor(atac,asisgn_peak_name = 'peak_category', peak = "peak_type",distance = 'distance'):
     
     
@@ -257,6 +257,9 @@ def separate_GRE_gene(atac,asisgn_peak_name = 'peak_category', peak = "peak_type
 def define_open_express_gene(adata_rna, adata_atac, rna_key = "var_names", atac_key = "gene"):
     
     adata_CRE, adata_gene, adata_promoter = separate_GRE_gene_promotor(adata_atac)
+    
+    # add a new column to adata_gene
+    adata_gene.var[atac_key] = adata_gene.var_names
        
     # Extract gene names from 'adata'
     rna_gene_names = list(adata_rna.var[rna_key])  
