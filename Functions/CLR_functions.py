@@ -19,7 +19,13 @@ from sklearn.metrics import normalized_mutual_info_score
 from sklearn.metrics import mutual_info_score
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.feature_selection import mutual_info_classif
+from sklearn.preprocessing import StandardScaler
 from scipy import stats
+from joblib import Parallel, delayed
+
+
+
+# ---------------------------------------------CLR Data Cleaning Functions------------------------------------------------
 
 
 # isolate gene by chromosome. 
@@ -43,8 +49,8 @@ def subset_adata_by_chromosome(adata, chromosome_num):
     return adata_subset
 
 
-# normalize one chromosome's data
-def normalize_by_chromasome(adata_rna, original_adata):
+# normalize one chromosome's data by original counts
+def normalize_by_orgin(adata_rna, original_adata):
     
     # extract selected gene and cells 
     original_adata = original_adata[original_adata.obs.index.isin(adata_rna.obs.index)]
@@ -60,41 +66,13 @@ def normalize_by_chromasome(adata_rna, original_adata):
     return new_adata
 
 
-# normalize all chromsome's data
-def normalize_all_chromasome(adata_rna, orginal_count_path, chr_num, chr_y = False):
-    
-    # get orginal mRNA counts 
-    original_adata = sc.read_10x_mtx(orginal_count_path, gex_only = False)
-        
-    # separate RNA and ATAC data 
-    gex_rows = list(map(lambda x: x == 'Gene Expression', original_adata.var['feature_types']))
-    original_adata = original_adata[:, gex_rows]
-    
-    # make variables unique
-    original_adata.var_names_make_unique()
-    
-    # make a new dict to store result
-    normalized_all_chr = {}
-    
-    # normalize by chr # 
-    for i in range(1, chr_num + 1):
-        chromosome_subsets = subset_adata_by_chromosome(adata_rna,i)
-        new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
-        
-        normalized_all_chr[f'chr{i}'] = new_adata
-        
-    # normalize chrX
-    chromosome_subsets = subset_adata_by_chromosome(adata_rna,-1)
-    new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
-    normalized_all_chr['chrX'] = new_adata
-    
-    # normalize chrY
-    if (chr_y == True):
-        chromosome_subsets = subset_adata_by_chromosome(adata_rna,-2)
-        new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
-        normalized_all_chr['chrY'] = new_adata
-    
-    return normalized_all_chr
+# ---------------------------------------------CLR Data Cleaning Functions------------------------------------------------
+
+
+
+
+
+# ---------------------------------------------CLR Core Functions---------------------------------------------------------
 
 
 # Calculate the Mutual Information score for gene expressions and chromatin accessbility 
@@ -139,8 +117,83 @@ def MI_Matrix(adata_atac, adata_rna):
     return mi_matrix
 
 
-# Calculate the Mutual Information score for gene expressions and chromatin accessbility 
-def MI_Matrix_MIinfoClassif(adata_atac, adata_rna):
+# calculate mutual information between RNA and ATAC data. 
+# Feature matrix is continous gene expression data. Target column is binary chromatin accessbility data.
+# n_neighbors is the number of neighbors to use for KNN estimator.
+# n_jobs is the number of jobs to run in parallel. #
+def MI_Matrix_MIinfoClassif( adata_rna, adata_atac, *, n_neighbors=3, n_jobs=1, random_state=0):
+
+    if adata_atac.n_obs != adata_rna.n_obs:
+        print("The two datasets do not have the same number of cells.")
+        return  # Exit the function early
+    
+    # convert rna and atac adata object to dataframe 
+    rna_expression = adata_rna.X.toarray()
+    atac_access = adata_atac.X.toarray() 
+    
+    # Use KNN entropy estimator which works in Euclidean space. Every variable in feature should be on the 
+    # same scale to avoid large numeric ranges dominate the neighbor
+    # This can be done by give every gene x-mu/sigma (so variance is 1)
+    scaler = StandardScaler()              # mean‑0, std‑1 per column
+    rna_expression_scaled = scaler.fit_transform(rna_expression)     # X is (n_samples, n_features)   
+    atac_access_scaled = scaler.fit_transform(atac_access)     # X is (n_samples, n_features)   
+     
+    atac_access_scaled = (atac_access_scaled > 0).astype(int) 
+
+    # helper function to compute mutual information
+    def _mi_info(j) -> np.ndarray:
+        y = atac_access_scaled[:, j]
+        return (mutual_info_classif(rna_expression_scaled, y, n_neighbors=n_neighbors, n_jobs=n_jobs, random_state=random_state, discrete_features=False))
+        
+    # parallelize
+    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(atac_access_scaled.shape[1]))
+    
+    mi_matrix = np.vstack(mi_list).T
+               
+    # convert to df  
+    mi_df = pd.DataFrame(mi_matrix, index=adata_atac.var_names, columns=adata_rna.var_names)
+                
+    return mi_df
+
+
+# calculate mutual information between RNA and ATAC data. 
+# Feature matrix is continous gene expression data. Target column is continous chromatin accessbility data.
+# n_neighbors is the number of neighbors to use for KNN estimator.
+# n_jobs is the number of jobs to run in parallel. #
+def MI_Matrix_MIinfoRegression(adata_rna, adata_atac, *, n_neighbors=3, n_jobs=1, random_state=0):
+    
+    if adata_atac.n_obs != adata_rna.n_obs:
+        print("The two datasets do not have the same number of cells.")
+        return  # Exit the function early
+    
+    # convert rna and atac adata object to dataframe 
+    rna_expression = adata_rna.X.toarray()
+    atac_access = adata_atac.X.toarray()
+    
+    
+    # Use KNN entropy estimator which works in Euclidean space. Every variable in feature should be on the 
+    # same scale to avoid large numeric ranges dominate the neighbor
+    # This can be done by give every gene x-mu/sigma (so variance is 1)
+    scaler = StandardScaler()              # mean‑0, std‑1 per column
+    rna_expression_scaled = scaler.fit_transform(rna_expression)     # X is (n_samples, n_features)   
+    atac_access_scaled = scaler.fit_transform(atac_access)     # X is (n_samples, n_features)
+     
+     
+    # helper function to compute mutual information
+    def _mi_info(j) -> np.ndarray:
+        y = atac_access_scaled[:, j]
+        return (mutual_info_regression(rna_expression_scaled, y, n_neighbors=n_neighbors, n_jobs=n_jobs, random_state=random_state, discrete_features=False))
+        
+    # parallelize
+    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(atac_access_scaled.shape[1]))
+
+    
+    mi_matrix = np.vstack(mi_list).T
+               
+    # convert to df  
+    mi_df = pd.DataFrame(mi_matrix, index=adata_atac.var_names, columns=adata_rna.var_names)
+                
+    return mi_df
     
     if adata_atac.n_obs != adata_rna.n_obs:
         print("The two datasets do not have the same number of cells.")
@@ -149,43 +202,291 @@ def MI_Matrix_MIinfoClassif(adata_atac, adata_rna):
     # convert rna and atac adata object to dataframe 
     rna_expression = adata_rna.X.toarray()
     atac_access = adata_atac.X.toarray() 
-    atac_access = (atac_access > 0).astype(int)   
     
-    # calculate MI matrix 
-    n_cols_rna = rna_expression.shape[1]  #number of gene
-    n_cols_atac = atac_access.shape[1]  #number of peak
-
-    # Initialize the mutual information matrix
-    mi_matrix = np.zeros((n_cols_rna, n_cols_atac))
-
-    # Calculate mutual information for each pair of columns
-    for i in range(n_cols_rna):
-        rna = rna_expression[:,i].reshape(-1, 1)
-        for j in range(n_cols_atac):
-                atac = atac_access[:, j]
-                mi = mutual_info_classif(rna, atac, discrete_features = False)
-                mi_matrix[i, j] = mi[0]
+    
+    '''
+    # Use KNN entropy estimator which works in Euclidean space. Every variable in feature should be on the 
+    # same scale to avoid large numeric ranges dominate the neighbor
+    # This can be done by give every gene x-mu/sigma (so variance is 1)
+    scaler = StandardScaler()              # mean‑0, std‑1 per column
+    rna_expression_scaled = scaler.fit_transform(rna_expression)     # X is (n_samples, n_features)   
+    '''
+     
+    # helper function to compute mutual information
+    def _mi_info(j) -> np.ndarray:
+        y = atac_access[:, j]
+        return (mutual_info_regression(rna_expression, y, n_neighbors=n_neighbors, n_jobs=n_jobs, random_state=random_state, discrete_features=False))
+        
+    # parallelize
+    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(atac_access.shape[1]))
+    
+    mi_matrix = np.vstack(mi_list).T
                
     # convert to df  
-    mi_df = pd.DataFrame(mi_matrix, index=adata_rna.var_names, columns=adata_atac.var_names)
+    mi_df = pd.DataFrame(mi_matrix, index=adata_atac.var_names, columns=adata_rna.var_names)
                 
     return mi_df
 
 
-# Computer z-score matrix from MI matrix
+# Given the MI matrix, adjust the MI values by peak distance to target gene TSS
+def distance_adjustment(MI_Matrix, gene_tss):
+    
+    MI_Matrix_adjusted = MI_Matrix.copy()
+
+    for gene_name in MI_Matrix.columns:
+        
+        gene = MI_Matrix[gene_name] # obtain peaks name and MI values assciated with the gene
+        tss = gene_tss[gene_name] # obtain TSS of the gene
+
+        for peak_name,value in gene.items():
+            
+            # for each peak, obtain the distance from middle of peak to TSS
+            start = peak_name.split(':')[1].split('-')[0]
+            end = peak_name.split(':')[1].split('-')[1]
+            mid = int((int(start) + int(end)) / 2)
+            
+            distance = abs(mid - tss)
+            
+            #print(f"Gene: {gene_name}, tss: {tss}, Peak: {peak_name}, mid : {mid}, Distance to TSS: {distance}")
+            
+            # Ajust the MI value by distanc
+            MI_adjusted = (gene[peak_name]* (1/distance))
+            MI_Matrix_adjusted[gene_name][peak_name] = MI_adjusted
+        
+        
+    return MI_Matrix_adjusted
+    
+    
+# Computer z-score matrix from MI matrix #
 def CLR_Matrix(mi_matrix):
     
     # calculate z-score
-    z_score_atac=pd.DataFrame(stats.zscore(mi_matrix,axis=0))
+    z_score_atac=pd.DataFrame(stats.zscore(mi_matrix,axis=0,ddof=0, nan_policy='omit'))
     z_score_atac[z_score_atac<0]=0
 
-    z_score_rna=pd.DataFrame(stats.zscore(mi_matrix,axis=1))
+    z_score_rna=pd.DataFrame(stats.zscore(mi_matrix,axis=1,ddof=0, nan_policy='omit'))
     z_score_rna[z_score_rna<0]=0
 
     # combine z-score
     CLR_Matrix =np.sqrt(z_score_atac**2+z_score_rna**2)
+    
+    # rename the columns and index
+    CLR_Matrix = pd.DataFrame(CLR_Matrix.values, index=mi_matrix.index, columns=mi_matrix.columns)
 
     return CLR_Matrix
+
+
+# filter all CLR_matrixes by z-score
+def z_score_filter(CLR_matrix, zthre):
+    
+    # filter out all entries smaller than z-thre
+    result = CLR_matrix.applymap(lambda x: x if x > zthre else 0.0 )
+        
+    # drop any gene or peaks that has no association to ther peaks or genes
+    result = result.loc[:,CLR_matrix.sum(axis=0) != 0]
+    result = result.loc[CLR_matrix.sum(axis=1) != 0]
+        
+    return result
+
+
+# intesect two CLR matrixes 
+def intersect_chromsome_matrixes(CLR_1, CLR_2):
+    
+    CLR_1 = CLR_1.sort_index(axis=0).sort_index(axis=1) 
+    CLR_2 = CLR_2.sort_index(axis=0).sort_index(axis=1) 
+            
+    intersected_matrix = np.sqrt(CLR_1**2+CLR_2**2)
+    
+    intersected_matrix = intersected_matrix.loc[:,intersected_matrix.sum(axis=0) != 0]
+    intersected_matrix = intersected_matrix.loc[intersected_matrix.sum(axis=1) != 0]
+    
+    return pd.DataFrame(intersected_matrix, index=CLR_1.index, columns=CLR_1.columns)
+
+
+# ---------------------------------------------CLR Core Functions---------------------------------------------------------
+
+
+
+
+# ---------------------------------------------Scale up Functions---------------------------------------------------------
+
+
+# normalize all chromsome's data
+def normalize_all_chromasome(adata_rna, orginal_count_path, chr_num, chr_y = False):
+    
+    # get orginal mRNA counts 
+    original_adata = sc.read_10x_mtx(orginal_count_path, gex_only = False)
+        
+    # separate RNA and ATAC data 
+    gex_rows = list(map(lambda x: x == 'Gene Expression', original_adata.var['feature_types']))
+    original_adata = original_adata[:, gex_rows]
+    
+    # make variables unique
+    original_adata.var_names_make_unique()
+    
+    # make a new dict to store result
+    normalized_all_chr = {}
+    
+    # normalize by chr # 
+    for i in range(1, chr_num + 1):
+        chromosome_subsets = subset_adata_by_chromosome(adata_rna,i)
+        new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
+        
+        normalized_all_chr[f'chr{i}'] = new_adata
+        
+    # normalize chrX
+    chromosome_subsets = subset_adata_by_chromosome(adata_rna,-1)
+    new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
+    normalized_all_chr['chrX'] = new_adata
+    
+    # normalize chrY
+    if (chr_y == True):
+        chromosome_subsets = subset_adata_by_chromosome(adata_rna,-2)
+        new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
+        normalized_all_chr['chrY'] = new_adata
+    
+    return normalized_all_chr
+
+
+# compute for CLR matrixes  for all chromosomes
+def compute_CLR_matrixes(MI_matrixes):
+    CLR_matrixes =  {}
+    
+    # iterate through every chr
+    for key, value in MI_matrixes.items():
+        result = CLR_Matrix(value) # compute value for each chr 
+        CLR_matrixes[key] = result
+        
+    return CLR_matrixes
+
+
+# takes the two adata set with same cells to perform MI association between CRE peaks and gene peaks
+# gene_names and cre_names are names for CRE peaks and gene stored in orginal data
+def compute_CLR_CRE_chromosome(adata_cre, adata_gene, start_chr , end_chr ,  gene_names = 'gene', cre_names = 'gene_ids', chr_x = False, chr_y = False):
+    
+    MI_matrixes = {}
+    
+    # run CLR on X chr
+    def Chr_x():
+        
+        # subset 
+        adata_gene_sub = subset_adata_by_chromosome(adata_gene, -1)
+        adata_cre_sub = subset_adata_by_chromosome(adata_cre, -1)
+        
+        # compute MI 
+        chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
+        
+        # rename 
+        chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
+        
+        MI_matrixes[f'chrX'] = chromosome_subsets_df
+        print('completed chrX')
+        
+    # run CLR on y chr
+    def Chr_y():
+        adata_gene_sub = subset_adata_by_chromosome(adata_gene, -2)
+        adata_cre_sub = subset_adata_by_chromosome(adata_cre, -2)
+            
+        chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
+        chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
+        
+        MI_matrixes['chrY'] = chromosome_subsets_df
+        print('completed chrY')
+        
+    # run CLR on # chr
+    def chr_n():
+        for i in range (start_chr,end_chr+1):
+            adata_gene_sub = subset_adata_by_chromosome(adata_gene, i)
+            adata_cre_sub = subset_adata_by_chromosome(adata_cre, i)
+            
+            chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
+            chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
+
+            MI_matrixes[f'chr{i}'] = chromosome_subsets_df
+            print(f'completed chr{i}')
+    
+    
+    # only wants x or y chr
+    if ((start_chr <= 0) or (end_chr <= 0)):
+        
+        if chr_x == True: Chr_x()
+        if chr_y == True: Chr_y()
+        return MI_matrixes  
+    
+    # wants # chr with x or y chr 
+    else:
+        chr_n()
+        if chr_x == True: Chr_x()
+        if chr_y == True: Chr_y() 
+        return MI_matrixes
+    
+
+# takes the two adata set with same cells to perform MI association between CRE peaks and gene expressions
+# gene_names and cre_names are names for CRE peaks and gene stored in orginal data
+def compute_CLR_RNA_chromosome(adata_cre, adata_gene, start_chr, end_chr,  gene_names = 'var_names', cre_names = 'gene_ids', chr_x = False, chr_y = False):
+    
+    
+    MI_matrixes = {}
+    
+    # run CLR on X chr
+    def Chr_x():
+        
+        # subset 
+        adata_gene_sub =  adata_gene['chrX']
+        adata_cre_sub = subset_adata_by_chromosome(adata_cre, -1)
+        
+        # compute MI 
+        chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
+        
+        # rename 
+        chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
+        
+        MI_matrixes['chrX'] = chromosome_subsets_df
+        print('completed chrX')
+        
+    # run CLR on y chr
+    def Chr_y():
+        adata_gene_sub = adata_gene['chrY'] 
+        adata_cre_sub = subset_adata_by_chromosome(adata_cre, -2)
+            
+        chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
+        chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
+        
+        MI_matrixes['chrY'] = chromosome_subsets_df
+        print('completed chrY')
+        
+    # run CLR on # chr
+    def chr_n():
+        for i in range (start_chr,end_chr+1):
+            adata_gene_sub =  adata_gene[f'chr{i}']
+            adata_cre_sub = subset_adata_by_chromosome(adata_cre, i)
+            
+            chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
+            chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
+
+            MI_matrixes[f'chr{i}'] = chromosome_subsets_df
+            print(f'completed chr{i}')
+    
+    
+    # only wants x or y chr
+    if (start_chr <= 0 or end_chr <= 0):
+        
+        if chr_x == True: Chr_x()
+        if chr_y == True: Chr_y()
+        return MI_matrixes  
+    
+    # wants # chr with x or y chr 
+    else:
+        chr_n()
+        if chr_x == True: Chr_x()
+        if chr_y == True: Chr_y() 
+        return MI_matrixes
+
+
+# ---------------------------------------------Scale up Functions---------------------------------------------------------
+
+
+
 
 """
 # start with ChrY, ChrX, then Chr1 to the rest
@@ -274,205 +575,6 @@ def filter_by_zscore(CLR_peaks,CLR_rna, zscore):
     CLR_rna[CLR_rna < zscore] = 0
     return CLR_peaks.copy(), CLR_rna.copy()
 """
-
-
-
-# takes the two adata set with same cells to perform MI association between CRE peaks and gene peaks
-# gene_names and cre_names are names for CRE peaks and gene stored in orginal data
-def compute_CLR_CRE_chromosome(adata_cre, adata_gene, start_chr , end_chr ,  gene_names = 'gene', cre_names = 'gene_ids', chr_x = False, chr_y = False):
-    
-    MI_matrixes = {}
-    
-    # run CLR on X chr
-    def Chr_x():
-        
-        # subset 
-        adata_gene_sub = subset_adata_by_chromosome(adata_gene, -1)
-        adata_cre_sub = subset_adata_by_chromosome(adata_cre, -1)
-        
-        # compute MI 
-        chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
-        
-        # rename 
-        chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
-        
-        MI_matrixes[f'chrX'] = chromosome_subsets_df
-        print('completed chrX')
-        
-    # run CLR on y chr
-    def Chr_y():
-        adata_gene_sub = subset_adata_by_chromosome(adata_gene, -2)
-        adata_cre_sub = subset_adata_by_chromosome(adata_cre, -2)
-            
-        chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
-        chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
-        
-        MI_matrixes['chrY'] = chromosome_subsets_df
-        print('completed chrY')
-        
-    # run CLR on # chr
-    def chr_n():
-        for i in range (start_chr,end_chr+1):
-            adata_gene_sub = subset_adata_by_chromosome(adata_gene, i)
-            adata_cre_sub = subset_adata_by_chromosome(adata_cre, i)
-            
-            chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
-            chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
-
-            MI_matrixes[f'chr{i}'] = chromosome_subsets_df
-            print(f'completed chr{i}')
-    
-    
-    # only wants x or y chr
-    if ((start_chr <= 0) or (end_chr <= 0)):
-        
-        if chr_x == True: Chr_x()
-        if chr_y == True: Chr_y()
-        return MI_matrixes  
-    
-    # wants # chr with x or y chr 
-    else:
-        chr_n()
-        if chr_x == True: Chr_x()
-        if chr_y == True: Chr_y() 
-        return MI_matrixes
-    
-
-# compute for CLR matrixes  for all chromosomes
-def compute_CLR_matrixes(MI_matrixes):
-    CLR_matrixes =  {}
-    
-    # iterate through every chr
-    for key, value in MI_matrixes.items():
-        result = CLR_Matrix(value) # compute value for each chr 
-        CLR_matrixes[key] = result
-        
-    return CLR_matrixes
-
-
-# takes the two adata set with same cells to perform MI association between CRE peaks and gene expressions
-# gene_names and cre_names are names for CRE peaks and gene stored in orginal data
-def compute_CLR_RNA_chromosome(adata_cre, adata_gene, start_chr, end_chr,  gene_names = 'var_names', cre_names = 'gene_ids', chr_x = False, chr_y = False):
-    
-    
-    MI_matrixes = {}
-    
-    # run CLR on X chr
-    def Chr_x():
-        
-        # subset 
-        adata_gene_sub =  adata_gene['chrX']
-        adata_cre_sub = subset_adata_by_chromosome(adata_cre, -1)
-        
-        # compute MI 
-        chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
-        
-        # rename 
-        chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
-        
-        MI_matrixes['chrX'] = chromosome_subsets_df
-        print('completed chrX')
-        
-    # run CLR on y chr
-    def Chr_y():
-        adata_gene_sub = adata_gene['chrY'] 
-        adata_cre_sub = subset_adata_by_chromosome(adata_cre, -2)
-            
-        chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
-        chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
-        
-        MI_matrixes['chrY'] = chromosome_subsets_df
-        print('completed chrY')
-        
-    # run CLR on # chr
-    def chr_n():
-        for i in range (start_chr,end_chr+1):
-            adata_gene_sub =  adata_gene[f'chr{i}']
-            adata_cre_sub = subset_adata_by_chromosome(adata_cre, i)
-            
-            chromosome_subsets = MI_Matrix(adata_cre_sub,adata_gene_sub)
-            chromosome_subsets_df = pd.DataFrame(chromosome_subsets, columns=adata_cre_sub.var[cre_names], index = adata_gene_sub.var[gene_names])
-
-            MI_matrixes[f'chr{i}'] = chromosome_subsets_df
-            print(f'completed chr{i}')
-    
-    
-    # only wants x or y chr
-    if (start_chr <= 0 or end_chr <= 0):
-        
-        if chr_x == True: Chr_x()
-        if chr_y == True: Chr_y()
-        return MI_matrixes  
-    
-    # wants # chr with x or y chr 
-    else:
-        chr_n()
-        if chr_x == True: Chr_x()
-        if chr_y == True: Chr_y() 
-        return MI_matrixes
-
-
-
-
-
-# filter all CLR_matrixes by z-score
-def z_score_filter(CLR_matrixes, zthre):
-    zthre_matriex = {}
-    
-        # iterate through every chr
-    for key, value in CLR_matrixes.items():
-        
-        # filter out all entries smaller than z-thre
-        result = value.applymap(lambda x: x if x > zthre else 0 )
-        
-        # drop any gene or peaks that has no association to ther peaks or genes
-        result = result.loc[:,value.sum(axis=0) != 0]
-        result = result.loc[value.sum(axis=1) != 0]
-        
-        zthre_matriex[key] = result
-        
-    return zthre_matriex
-
-
-# intesect two CLR matrixes 
-def intersect_chromsome_matrixes(CLR_1, CLR_2, chr_x = False, chr_y = False):
-    
-    intersected_chr_matrixes = {}
-    
-    # for chr #
-    for key in CLR_1:
-        if key in CLR_2:
-            chr_CLR_1 = CLR_1[key]
-            chr_CLR_2 = CLR_2[key]
-            
-            chr_CLR_1 = chr_CLR_1.sort_index()
-            chr_CLR_2 = chr_CLR_2.sort_index()
-            
-            intersected_chr_matrixes[key] = chr_CLR_1*chr_CLR_2
-            
-    # for chrX
-    if chr_x == True:
-        chr_CLR_1 = CLR_1['chrX']
-        chr_CLR_2 = CLR_2['chrX']
-        
-        chr_CLR_1 = chr_CLR_1.sort_index()
-        chr_CLR_2 = chr_CLR_2.sort_index()
-        
-        intersected_chr_matrixes['chrX'] = chr_CLR_1*chr_CLR_2
-
-    # for chrY
-    if chr_y == True:
-        chr_CLR_1 = CLR_1['chrY']
-        chr_CLR_2 = CLR_2['chrY']
-        
-        chr_CLR_1 = chr_CLR_1.sort_index()
-        chr_CLR_2 = chr_CLR_2.sort_index()
-        
-        intersected_chr_matrixes['chrY'] = chr_CLR_1*chr_CLR_2
-    
-    return intersected_chr_matrixes
-
-
 
 
 

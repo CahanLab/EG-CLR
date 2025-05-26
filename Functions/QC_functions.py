@@ -88,6 +88,7 @@ def limit_gene_by_file(file_path, adata, var_key):
     return adata_filtered
 
 
+# limit genes to a list of gene names 
 def limit_gene_by_list(gene_names, adata, var_key):
     
     # Extract gene names from 'adata'
@@ -118,13 +119,13 @@ def df_gene_chromosome(adata):
     return var_df
 
 
-# write CLR matrixes into pickle file
+# write CLR matrixes into pickle file #
 def write_matrixes(file_name, matrixes):
     with open(f'{file_name}.pkl', 'wb') as f:
         pickle.dump(matrixes, f)
 
 
-# load CLR matrixes pickle file
+# load CLR matrixes pickle file #
 def load_matrxies(file_name):
     with open(file_name, 'rb') as file:
         matrixes = pickle.load(file)
@@ -234,7 +235,7 @@ def separate_GRE_gene_promotor(atac,asisgn_peak_name = 'peak_category', peak = "
     return  adata_CRE, adata_gene, adata_promotor
 
 
-# separate gene, promotor, CRE for atac data
+# separate gene, promotor + CRE for atac data #
 def separate_GRE_gene(atac,asisgn_peak_name = 'peak_category', peak = "peak_type",distance = 'distance'):
     
     
@@ -253,16 +254,13 @@ def separate_GRE_gene(atac,asisgn_peak_name = 'peak_category', peak = "peak_type
     return  adata_CRE, adata_gene
 
 
-# find gene that is both accessible and expressing in each cell #
-def define_open_express_gene(adata_rna, adata_atac, rna_key = "var_names", atac_key = "gene"):
+# find gene that is both accessible in gene body and promoter, and expressing in each cell #
+def define_rna_promoter_gene_OCregion(adata_rna, adata_atac, atac_key = "gene"):
     
     adata_CRE, adata_gene, adata_promoter = separate_GRE_gene_promotor(adata_atac)
-    
-    # add a new column to adata_gene
-    adata_gene.var[atac_key] = adata_gene.var_names
-       
+           
     # Extract gene names from 'adata'
-    rna_gene_names = list(adata_rna.var[rna_key])  
+    rna_gene_names = list(adata_rna.var_names)  
     atac_gene_names = list(adata_gene.var[atac_key])  
     promotor_gene_names = list(adata_promoter.var[atac_key])
         
@@ -270,7 +268,7 @@ def define_open_express_gene(adata_rna, adata_atac, rna_key = "var_names", atac_
     overlap_genes = set(atac_gene_names).intersection(set(rna_gene_names),set(promotor_gene_names) )
 
     # Subset 'adata' to keep only the overlapping genes
-    rna_list = adata_rna.var_names[adata_rna.var[rna_key].isin(overlap_genes)]  
+    rna_list = adata_rna.var_names[adata_rna.var_names.isin(overlap_genes)]  
     atac_list = adata_gene.var_names[adata_gene.var[atac_key].isin(overlap_genes)] 
     promoter_list =  adata_promoter.var_names[adata_promoter.var[atac_key].isin(overlap_genes)]
     
@@ -286,102 +284,57 @@ def define_open_express_gene(adata_rna, adata_atac, rna_key = "var_names", atac_
     return adata_rna_flitered, adata_atac_gene_filtered, adata_CRE, adata_atac_promoter_filtered
 
 
-# take atac gene body and atac gene promotor, find gene that is activated in each cell
-def find_activated_gene(adata_gene, adata_promotor, key_gene = "gene", key_promotor = "gene"):
+# find gene that is both accessible in promoter, and expressing in each cell #
+def define_rna_promoter_OCregion(adata_rna, adata_atac, atac_key = "gene"):
+    
+    _, _, adata_promoter = separate_GRE_gene_promotor(adata_atac)
     
     # first check they have same gene set
-    if (set(adata_gene.var[key_gene]) != set(adata_promotor.var[key_promotor])):
+    if (set(adata_rna.var_names).intersection(set(adata_promoter.var["gene"])) == 0):
         print("do not have the same gene")
         return 
+           
+    # Extract gene names from 'adata'
+    rna_gene_names = list(adata_rna.var_names)  
+    promotor_gene_names = list(adata_promoter.var[atac_key])
+        
+    # Find the intersection of gene names
+    overlap_genes = set(promotor_gene_names).intersection(set(rna_gene_names))
+
+    # Subset 'adata' to keep only the overlapping genes
+    rna_list = adata_rna.var_names[adata_rna.var_names.isin(overlap_genes)]  
+    promoter_list =  adata_promoter.var_names[adata_promoter.var[atac_key].isin(overlap_genes)]
     
-    else:
-        # convert the adata value into df
-        adata_gene_X= pd.DataFrame(adata_gene.X.toarray(), index=adata_gene.obs_names, columns=adata_gene.var[key_gene])
-        adata_gene_X = adata_gene_X.groupby(axis=1, level=0).sum()  # sum the repeated gene 
-        adata_gene_X= adata_gene_X[sorted(adata_gene_X.columns)]    # sort the gene in same order
-        
-        
-        adata_promotor_X= pd.DataFrame(adata_promotor.X.toarray(), index=adata_promotor.obs_names, columns=adata_promotor.var[key_promotor])
-        adata_promotor_X = adata_promotor_X.groupby(axis=1, level=0).sum()     # sum the repeated gene promotor
-        adata_promotor_X= adata_promotor_X[sorted(adata_promotor_X.columns)]   # sort the gene in same order
+    # select shared genes
+    adata_rna_flitered = adata_rna[:,rna_list].copy()
+    adata_atac_promoter_filtered = adata_promoter[:,promoter_list].copy()
+    
+    # add one more label to standardize naming
+    adata_rna_flitered.var['gene'] = adata_rna_flitered.var_names
 
         
-        # for each cell find gene that is both open in its gene body and promotor
-        df_intersect = adata_promotor_X * adata_gene_X
-        df_binarized = (df_intersect > 0).astype(int)
-        
-        # reorganize the data into adata formate
-        X_sparse = sparse.csr_matrix(df_binarized.values)
-        adata_atac = ad.AnnData(X=X_sparse, obs=pd.DataFrame(index=df_binarized.index), var=pd.DataFrame(index=df_binarized.columns))
-        
-        var_df = df_gene_chromosome(adata_gene) # gather orginal var information
-        
-        adata_atac.var["Chromosome"] = var_df["Chromosome"] # pass back
-        adata_atac.var["Start"] = var_df["Start"]
-        adata_atac.var["End"] = var_df["End"]
-        adata_atac.var['gene'] = var_df["gene"]
-        adata_atac.var['gene_ids'] = var_df["gene_ids"]
-        
-        
-        return adata_atac
+    return adata_rna_flitered, adata_atac_promoter_filtered
+
+
+# combine promoter and gene body counts #
+def combine_promoter_gene_counts(adata_promoter, adata_gene_body, gene_key="gene"):
+    
+    adata = ad.concat(
+        [adata_promoter, adata_gene_body],
+        axis         = 1,           
+        join         = "outer",    
+        merge        = "same",      
+        label        = None,        
+        index_unique = None         
+    )
+    
+    adata_df = adata.to_df().transpose()
+    adata_df[gene_key] = adata.var[gene_key]
+    
+    gene_sums = adata_df.groupby(gene_key).sum(numeric_only=True)
+    gene_sums_sparse= sparse.csr_matrix(gene_sums.transpose().values)  
+    
+    return ad.AnnData(X=gene_sums_sparse, obs=pd.DataFrame(index=gene_sums.columns), var = pd.DataFrame(index=gene_sums.index))
 
 
 # ---------------------------------------------ATAC-preprocessing Functions------------------------------------------------
-
-
-# ---------------------------------------------RNA-preprocessing Functions------------------------------------------------
-
-# given rna adata, compute average for each cell with  "n_counts" and "n_genes"
-# for each gene in each cell, if gene mRNA count > average, save orginal values
-# if mRNA count < avereage, save 0
-def define_above_baseline_gene(adata):
-    
-    # Calculate n_counts: total counts per cell (sum of all gene counts per cell)
-    adata.obs['n_counts'] = adata.X.sum(axis=1)
-
-    # Calculate n_genes: number of non-zero gene counts per cell (number of expressed genes)
-    adata.obs['n_genes'] = (adata.X > 0).sum(axis=1)
-    
-    # computer average
-    average_mrna_counts = adata.obs['n_counts']/adata.obs['n_genes']
-    avg_mrna_per_cell = average_mrna_counts.values
-
-    # perform gene baseline limitation
-    expression_matrix = adata.X.toarray()
-    new_expression_matrix = np.where(expression_matrix > avg_mrna_per_cell[:, None], expression_matrix, 0)
-    
-    new_adata = ad.AnnData(X=new_expression_matrix, obs=adata.obs.copy(), var=adata.var.copy())
-    
-    return new_adata
-
-
-
-'''
-# limit adata to the shared genes 
-def define_open_express_gene(adata_rna, adata_atac, rna_key, atac_key):
-    
-    adata_CRE, adata_gene = separate_GRE_gene(adata_atac)
-       
-    # Extract gene names from 'adata'
-    rna_gene_names = list(adata_rna.var[rna_key])  
-    atac_gene_names = list(adata_gene.var[atac_key])  
-        
-    # Find the intersection of gene names
-    overlap_genes = set(atac_gene_names).intersection(set(rna_gene_names))
-
-    # Subset 'adata' to keep only the overlapping genes
-    rna_list = adata_rna.var_names[adata_rna.var[rna_key].isin(overlap_genes)]  
-    atac_list = adata_gene.var_names[adata_gene.var[atac_key].isin(overlap_genes)] 
-    
-    # select genes
-    adata_rna_flitered = adata_rna[:,rna_list].copy()
-    adata_atac_gene_filtered = adata_gene[:,atac_list].copy()
-        
-    return adata_rna_flitered, adata_atac_gene_filtered, adata_CRE
-'''
-
-
-
-# ---------------------------------------------RNA-preprocessing Functions------------------------------------------------
-
-

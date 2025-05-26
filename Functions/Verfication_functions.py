@@ -1,3 +1,4 @@
+### verfication
 import pandas as pd
 from muon import atac as ac
 from muon import prot as pt
@@ -7,57 +8,48 @@ random.seed(10)
 import pybedtools
 
 
-### verfication
-
-
 # ---------------------------------------------CRRSPRi Functions------------------------------------------------
 
 
-# compare CLR prediction with CRISPRi data #
-def CRISPRi_comparison(CRISPRi,CLR):
+# Take the prediction and CRIPSRi data for a gene (both must contain chr, start, end)
+# ensure ATAC-seq data and CRISPRi data are in the same genomic range #
+def select_testing_peaks(CRISPRi, ATAC):
     
-    # Find TP for CRISPRi
-    CRISPRi_TP = CRISPRi[CRISPRi['Significant'] == True].copy()
-    CRISPRi_TP = CRISPRi_TP[['chr', 'start', 'end']].copy()
-    
-    CLR_str = CLR.to_csv(sep="\t", header=False, index=False)
-    CRISPRi_TP_str = CRISPRi_TP.to_csv(sep="\t", header=False, index=False)
+    # Find the range of CRISPRi data
+    CRISPRi_start =  CRISPRi['start'].min()
+    CRISPRi_end = CRISPRi['end'].max() 
 
-    CLR_bed = pybedtools.BedTool(CLR_str, from_string=True)
-    CRISPRi_TP_bed = pybedtools.BedTool(CRISPRi_TP_str, from_string=True)
+    #print("CRISPRi starts at ",CRISPRi_start, " end at ", CRISPRi_end)
+
+    # Filter for overlapping peaks
+    ATAC_limited = ATAC[
+        (ATAC["end"].values.astype(int) <  CRISPRi_end) & 
+        (ATAC["start"].values.astype(int) > CRISPRi_start)
+    ].copy()
+    
+    ATAC_limited[["start", "end"]] = ATAC_limited[["start", "end"]].astype(int)
+
+    return ATAC_limited
+
+
+# coverlap between two data sets (chr, start, end)#
+def CRISPRi_comparison(A, B):
+    
+    A_str = A.to_csv(sep="\t", header=False, index=False)
+    B_str = B.to_csv(sep="\t", header=False, index=False)
+
+    A_bed = pybedtools.BedTool(A_str, from_string=True)
+    B_bed = pybedtools.BedTool(B_str, from_string=True)
 
     # Intersect: returns TP CRIPSRi peaks that overlap with CLR peaks
-    overlap =  CRISPRi_TP_bed.intersect(CLR_bed, wa=True)  
+    overlap =  A_bed.intersect(B_bed, wa=True)  
 
     # Convert result to DataFrame
     overlap_df = overlap.to_dataframe(names=["chr", "start", "end"])
+    overlap_df[["start", "end"]] = overlap_df[["start", "end"]].astype(int)
     
     return overlap_df
     
-
-# Find detected peaks in the CRISPRi data #
-def find_detected_peaks(CLR, CRISPRi): 
-    
-    # limit to chr, start and end
-    CLR = CLR[["chr", "start", "end"]].copy()
-    CRISPRi_new = CRISPRi[["chr", "start", "end"]].copy()
-
-    # Load as BedTool
-    CLR_str = CLR.to_csv(sep="\t", header=False, index=False)
-    CRISPRi_str = CRISPRi_new.to_csv(sep="\t", header=False, index=False)
-
-    CLR_bed = pybedtools.BedTool(CLR_str, from_string=True)
-    CRISPRi_bed = pybedtools.BedTool(CRISPRi_str, from_string=True)
-    
-    # Drop non-detected peaks in CRISPRi
-    CRISPRi_filtered_bed = CRISPRi_bed.intersect(CLR_bed, wa=True)
-    detected_peaks = CRISPRi_filtered_bed.to_dataframe(names=["chr", "start", "end"])
-    
-    # Add the original columns
-    df_merged = pd.merge(detected_peaks,CRISPRi, on=['chr', 'start', 'end'], how='left')
-
-    return df_merged
-
 
 # Find the peaks (Chr, Start, End, CLR_value) associated with gene #
 def EG_pair_by_name(gene, CLR_Matrix):
@@ -80,20 +72,8 @@ def EG_pair_by_name(gene, CLR_Matrix):
 # ---------------------------------------------CRRSPRi Functions------------------------------------------------
 
 
-# find overlaps between two bed file ( but in df format)
-def count_overlapping_peaks(test_df, reference_df):
-    
-    # Convert test_df and reference_df into pybedtools BedTool objects
-    test_bed = pybedtools.BedTool.from_dataframe(test_df)
-    reference_bed = pybedtools.BedTool.from_dataframe(reference_df)
-    
-    # Perform intersection (overlap) between the test and reference intervals
-    overlap = reference_bed.intersect(test_bed, u=True)
-    
-    # Count the number of overlaps
-    overlap_count = len(overlap)
-    
-    return overlap, overlap_count
+
+'''
 
 
 # convert final CLR cCRE matrixes into list 
@@ -123,6 +103,8 @@ def convert_columns_to_list_chr(CLR_final):
     return column_lists
 
 
+
+
 # find overlaps between two df file ( but in df format)
 def count_overlapping_peaks(test_df, reference_df):
     
@@ -139,7 +121,7 @@ def count_overlapping_peaks(test_df, reference_df):
     return overlap, overlap_count
 
 
-'''
+
 # find overlaps between a given bed file and dict containing chromosome CREs
 # overlap: overlapped sections
 # counts: each chr, the number of overlapped 
