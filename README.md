@@ -26,17 +26,18 @@ pybedtools >= 0.12.0
 
 Full package list is in environment.yml
 
-# Data input requirement:
+# Data Input Requirement:
 
-* Paired single-cell multiomics data (in count matrix format):
+* Paired single-cell multiomics data (read count matrix in adata):
    * Single-cell RNA-seq
    * Single-cell ATAC-seq
 
 * Peak annotation file (tsv format) for scATAC-seq (indicating promoter, enhancer, gene regions):
-   * 10X ARC provided peak_annotation.tsv with the following rule:
+   * e.g. 10X ARC provided peak_annotation.tsv in reference 
       1. If a peak overlaps with promoter region (-1000bp, +100bp) of any TSS, it is annotated as a promoter peak of the gene.
       2. If a peak is within 200kb of the closest TSS, and if it is not a promoter peak of the gene of the closest TSS, it will be annotated as a distal peak of that gene.
       3. If a peak overlaps the body of a transcript, and it is not a promoter nor a distal peak of the gene, it will be annotated as a distal peak of that gene with distance set as zero.
       4. If a peak has not been mapped to any gene at the step, it will be annotated as an intergenic peak without a gene symbol assigned.
-
    * Any customized peak annotation in tsv format will be accepted.
+
+# Output
