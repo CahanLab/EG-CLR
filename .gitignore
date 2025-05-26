@@ -1,0 +1,11 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.DS_Store
+AMULET-main
+ATAC-seq_preprocessing_R.Rprojfile.rds
+Test
+file.rds
+*.Rproj
+_pycache__
