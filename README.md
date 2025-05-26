@@ -6,18 +6,23 @@
 
 # Environment:
 
-* Python >= 3.10
-* Essential Packages: 
-    * anndata >= 0.11.4
-    * numpy >= 2.1.3
-    * pandas >= 2.2.3
-    * scanpy >= 1.11.1
-    * muon >= 0.1.7
-    * matplotlib >= 3.10.1
-    * scipy >= 1.15.2
-    * joblib >= 1.4.2
-    * pybedtools >= 0.12.0
- 
+```python
+
+# Python Version
+Python >= 3.10
+
+# Essential Packages: 
+anndata >= 0.11.4
+numpy >= 2.1.3
+pandas >= 2.2.3
+scanpy >= 1.11.1
+muon >= 0.1.7
+matplotlib >= 3.10.1
+scipy >= 1.15.2
+joblib >= 1.4.2
+pybedtools >= 0.12.0
+
+```
 
 # Data input requirement:
 
