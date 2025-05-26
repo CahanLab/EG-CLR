@@ -11,7 +11,7 @@
 # Python Version
 Python >= 3.10
 
-# Essential Packages: 
+# Essential Packages
 anndata >= 0.11.4
 numpy >= 2.1.3
 pandas >= 2.2.3
@@ -23,6 +23,8 @@ joblib >= 1.4.2
 pybedtools >= 0.12.0
 
 ```
+
+Full package list is in environment.yml
 
 # Data input requirement:
 
