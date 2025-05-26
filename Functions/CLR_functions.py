@@ -15,7 +15,6 @@ import pySingleCellNet as pySCN # pip install git+https://github.com/pcahan1/PyS
 import random
 random.seed(10)
 from sklearn.preprocessing import KBinsDiscretizer
-from sklearn.metrics import normalized_mutual_info_score
 from sklearn.metrics import mutual_info_score
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.feature_selection import mutual_info_classif
@@ -25,7 +24,7 @@ from joblib import Parallel, delayed
 
 
 
-# ---------------------------------------------CLR Data Cleaning Functions------------------------------------------------
+# ---------------------------------------------CLR Data Preprocessing Functions------------------------------------------------
 
 
 # isolate gene by chromosome. 
@@ -49,24 +48,228 @@ def subset_adata_by_chromosome(adata, chromosome_num):
     return adata_subset
 
 
-# normalize one chromosome's data by original counts
-def normalize_by_orgin(adata_rna, original_adata):
+# replace one chromosome's data by original counts
+def replace_by_origin(adata, original_adata):
     
     # extract selected gene and cells 
-    original_adata = original_adata[original_adata.obs.index.isin(adata_rna.obs.index)]
-    original_adata = original_adata[:,original_adata.var.index.isin(adata_rna.var.index)]
+    original_adata = original_adata[original_adata.obs.index.isin(adata.obs.index)]
+    original_adata = original_adata[:,original_adata.var.index.isin(adata.var.index)]
 
     # transfer var 
-    new_adata = ad.AnnData(X=original_adata.X.copy(), obs=adata_rna.obs.copy(), var=adata_rna.var.copy())
+    new_adata = ad.AnnData(X=original_adata.X.copy(), obs=adata.obs.copy(), var=adata.var.copy())
 
-    # Normalization
-    sc.pp.normalize_total(new_adata, target_sum=1e4)
-    sc.pp.log1p(new_adata)
     
     return new_adata
 
 
-# ---------------------------------------------CLR Data Cleaning Functions------------------------------------------------
+# sign chromosome location to gene by taking feature.tsv.gz from filter/raw matrix folder #
+def assign_chr(path, adata):
+    
+    # Load the full features.tsv file including all columns
+    features_df = pd.read_csv(path, header=None, sep='\t',compression="gzip")
+    features_df.columns = ['gene_ids', 'gene_symbols', 'feature_type', 'Chromosome', 'Start', 'End']
+    features_df.set_index("gene_ids", inplace=True)
+    
+    chromosome_mapping = features_df['Chromosome']
+    start_mapping = features_df['Start']
+    end_mapping = features_df['End']
+    
+
+    # Map the Chromosome data to adata.var using the gene_ids
+    adata.var['Chromosome'] = adata.var['gene_ids'].map(chromosome_mapping)
+    adata.var['Start'] = adata.var['gene_ids'].map(start_mapping)
+    adata.var['End'] = adata.var['gene_ids'].map(end_mapping)
+
+    return adata
+
+
+# Take in both 10X feature.tsv and peak_annotation.tsv. Transfer Chromosome, Start, End #
+def assign_loc(feature_path, annotation_path, adata):
+    
+    # Load the full features.tsv and atac_peak_annotation.tsv file 
+    features_df = pd.read_csv(feature_path, header=None, sep='\t')
+    
+    # Set features's header 
+    features_df.columns = ['gene_ids', 'gene_symbols', 'feature_type', 'Chromosome', 'Start', 'End']
+    features_df.set_index("gene_ids")
+    
+    # annotation file should already have header 
+    annota_df = pd.read_csv(annotation_path, sep='\t')
+        
+
+    # merge 2 df by combinations of chrom, start, end
+    merged_df = pd.merge(features_df,
+                        annota_df,
+                        how='left',
+                        left_on=['Chromosome', 'Start', 'End'],
+                        right_on=['chrom', 'start', 'end']
+                        )
+
+    # apply to only atac data
+    merged_df = merged_df[merged_df["feature_type"] == "Peaks"]
+    
+    # make unique by filter rows where 'distance' is 0 and 'gene_id' is a duplicate 
+    unique_combinations = merged_df['gene_ids'][merged_df['gene_ids'].duplicated(keep=False)]
+    filtered_df = merged_df[(merged_df['gene_ids'].isin(unique_combinations)) & (merged_df['distance'] == 0)]
+    
+    # when both distance is 0, drop the first one gene 
+    unique_combinations = merged_df['gene_ids'].drop_duplicates(keep='last')
+    filtered_df = merged_df.loc[unique_combinations.index]
+
+    # Set index as gene_ids
+    filtered_df.set_index('gene_ids', inplace=True)
+
+    adata.var['gene'] =  adata.var['gene_ids'].map(filtered_df['gene']) 
+    adata.var['distance'] = adata.var['gene_ids'].map(filtered_df['distance']) 
+    adata.var['peak_type'] = adata.var['gene_ids'].map(filtered_df['peak_type']) 
+
+
+
+    return adata
+
+
+
+# ---------------------------------------------CLR Data Preprocessing Functions------------------------------------------------
+
+
+
+
+
+
+# ---------------------------------------------Gene filtering Functions------------------------------------------------
+
+
+# separate gene, promotor, CRE for atac data #
+def separate_GRE_gene_promotor(atac,asisgn_peak_name = 'peak_category', peak = "peak_type",distance = 'distance'):
+    
+    
+    # first separate gene + promotor into gene, other peaks into CRE
+    atac.var[asisgn_peak_name] = pd.Series([""] * atac.var.shape[0])
+    atac.var[asisgn_peak_name] = atac.var[distance].apply(lambda x: 'gene' if x == 0.0 else 'CRE').copy()
+    
+    # Create a boolean mask based on the condition
+    cre_mask = atac.var[asisgn_peak_name] == 'CRE'
+    gene_mask = atac.var[asisgn_peak_name] == 'gene'
+
+    # Use the mask to subset the AnnData object
+    adata_CRE = atac[:, cre_mask].copy()
+    adata_gene = atac[:, gene_mask].copy()
+    
+    
+    # from gene+promotor, 
+    promotor_mask = adata_gene.var[peak] == "promoter"
+    gene_mask = adata_gene.var[peak] == "distal"
+
+    adata_promotor = adata_gene[:, promotor_mask].copy()
+    adata_promotor.var[asisgn_peak_name] = adata_promotor.var[peak].copy()
+    adata_gene = adata_gene[:, gene_mask].copy()
+    
+    return  adata_CRE, adata_gene, adata_promotor
+
+
+# separate gene, promotor + CRE for atac data #
+def separate_GRE_gene(atac,asisgn_peak_name = 'peak_category', peak = "peak_type",distance = 'distance'):
+    
+    
+    # first separate gene + promotor into gene, other peaks into CRE
+    atac.var[asisgn_peak_name] = pd.Series([""] * atac.var.shape[0])
+    atac.var[asisgn_peak_name] = atac.var[distance].apply(lambda x: 'gene' if x == 0.0 else 'CRE')
+    
+    # Create a boolean mask based on the condition
+    cre_mask = atac.var[asisgn_peak_name] == 'CRE'
+    gene_mask = atac.var[asisgn_peak_name] == 'gene'
+
+    # Use the mask to subset the AnnData object
+    adata_CRE = atac[:, cre_mask]
+    adata_gene = atac[:, gene_mask]
+    
+    return  adata_CRE, adata_gene
+
+
+# find gene that is both accessible in gene body and promoter, and expressing in each cell #
+def define_rna_promoter_gene_OCregion(adata_rna, adata_atac, atac_key = "gene"):
+    
+    adata_CRE, adata_gene, adata_promoter = separate_GRE_gene_promotor(adata_atac)
+           
+    # Extract gene names from 'adata'
+    rna_gene_names = list(adata_rna.var_names)  
+    atac_gene_names = list(adata_gene.var[atac_key])  
+    promotor_gene_names = list(adata_promoter.var[atac_key])
+        
+    # Find the intersection of gene names
+    overlap_genes = set(atac_gene_names).intersection(set(rna_gene_names),set(promotor_gene_names) )
+
+    # Subset 'adata' to keep only the overlapping genes
+    rna_list = adata_rna.var_names[adata_rna.var_names.isin(overlap_genes)]  
+    atac_list = adata_gene.var_names[adata_gene.var[atac_key].isin(overlap_genes)] 
+    promoter_list =  adata_promoter.var_names[adata_promoter.var[atac_key].isin(overlap_genes)]
+    
+    # select shared genes
+    adata_rna_flitered = adata_rna[:,rna_list].copy()
+    adata_atac_gene_filtered = adata_gene[:,atac_list].copy()
+    adata_atac_promoter_filtered = adata_promoter[:,promoter_list].copy()
+    
+    # add one more label to standardize naming
+    adata_rna_flitered.var['gene'] = adata_rna_flitered.var_names
+
+        
+    return adata_rna_flitered, adata_atac_gene_filtered, adata_CRE, adata_atac_promoter_filtered
+
+
+# find gene that is both accessible in promoter, and expressing in each cell #
+def define_rna_promoter_OCregion(adata_rna, adata_atac, atac_key = "gene"):
+    
+    _, _, adata_promoter = separate_GRE_gene_promotor(adata_atac)
+    
+    # first check they have same gene set
+    if (set(adata_rna.var_names).intersection(set(adata_promoter.var["gene"])) == 0):
+        print("do not have the same gene")
+        return 
+           
+    # Extract gene names from 'adata'
+    rna_gene_names = list(adata_rna.var_names)  
+    promotor_gene_names = list(adata_promoter.var[atac_key])
+        
+    # Find the intersection of gene names
+    overlap_genes = set(promotor_gene_names).intersection(set(rna_gene_names))
+
+    # Subset 'adata' to keep only the overlapping genes
+    rna_list = adata_rna.var_names[adata_rna.var_names.isin(overlap_genes)]  
+    promoter_list =  adata_promoter.var_names[adata_promoter.var[atac_key].isin(overlap_genes)]
+    
+    # select shared genes
+    adata_rna_flitered = adata_rna[:,rna_list].copy()
+    adata_atac_promoter_filtered = adata_promoter[:,promoter_list].copy()
+    
+    # add one more label to standardize naming
+    adata_rna_flitered.var['gene'] = adata_rna_flitered.var_names
+
+        
+    return adata_rna_flitered, adata_atac_promoter_filtered
+
+
+# combine promoter and gene body counts #
+def combine_promoter_gene_counts(adata_promoter, adata_gene_body, gene_key="gene"):
+    
+    adata = ad.concat(
+        [adata_promoter, adata_gene_body],
+        axis         = 1,           
+        join         = "outer",    
+        merge        = "same",      
+        label        = None,        
+        index_unique = None         
+    )
+    
+    adata_df = adata.to_df().transpose()
+    adata_df[gene_key] = adata.var[gene_key]
+    
+    gene_sums = adata_df.groupby(gene_key).sum(numeric_only=True)
+    gene_sums_sparse= sparse.csr_matrix(gene_sums.transpose().values)  
+    
+    return ad.AnnData(X=gene_sums_sparse, obs=pd.DataFrame(index=gene_sums.columns), var = pd.DataFrame(index=gene_sums.index))
+
+
+# ---------------------------------------------Gene filtering Functions------------------------------------------------
 
 
 
@@ -311,45 +514,9 @@ def intersect_chromsome_matrixes(CLR_1, CLR_2):
 # ---------------------------------------------Scale up Functions---------------------------------------------------------
 
 
-# normalize all chromsome's data
-def normalize_all_chromasome(adata_rna, orginal_count_path, chr_num, chr_y = False):
-    
-    # get orginal mRNA counts 
-    original_adata = sc.read_10x_mtx(orginal_count_path, gex_only = False)
-        
-    # separate RNA and ATAC data 
-    gex_rows = list(map(lambda x: x == 'Gene Expression', original_adata.var['feature_types']))
-    original_adata = original_adata[:, gex_rows]
-    
-    # make variables unique
-    original_adata.var_names_make_unique()
-    
-    # make a new dict to store result
-    normalized_all_chr = {}
-    
-    # normalize by chr # 
-    for i in range(1, chr_num + 1):
-        chromosome_subsets = subset_adata_by_chromosome(adata_rna,i)
-        new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
-        
-        normalized_all_chr[f'chr{i}'] = new_adata
-        
-    # normalize chrX
-    chromosome_subsets = subset_adata_by_chromosome(adata_rna,-1)
-    new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
-    normalized_all_chr['chrX'] = new_adata
-    
-    # normalize chrY
-    if (chr_y == True):
-        chromosome_subsets = subset_adata_by_chromosome(adata_rna,-2)
-        new_adata = normalize_by_chromasome(chromosome_subsets,original_adata)
-        normalized_all_chr['chrY'] = new_adata
-    
-    return normalized_all_chr
-
-
 # compute for CLR matrixes  for all chromosomes
 def compute_CLR_matrixes(MI_matrixes):
+    
     CLR_matrixes =  {}
     
     # iterate through every chr
