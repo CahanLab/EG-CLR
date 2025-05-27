@@ -11,9 +11,7 @@ import random
 random.seed(10)
 from scipy import sparse
 import anndata as ad
-import pySingleCellNet as pySCN # pip install git+https://github.com/pcahan1/PySingleCellNet.
-import random
-random.seed(10)
+#import pySingleCellNet as pySCN # pip install git+https://github.com/pcahan1/PySingleCellNet.
 from sklearn.preprocessing import KBinsDiscretizer
 from sklearn.metrics import mutual_info_score
 from sklearn.feature_selection import mutual_info_regression
@@ -249,24 +247,28 @@ def define_rna_promoter_OCregion(adata_rna, adata_atac, atac_key = "gene"):
 
 
 # combine promoter and gene body counts #
-def combine_promoter_gene_counts(adata_promoter, adata_gene_body, gene_key="gene"):
+def combine_promoter_gene_counts(adata_promoter, adata_gene_body = None, gene_key="gene"):
     
-    adata = ad.concat(
-        [adata_promoter, adata_gene_body],
-        axis         = 1,           
-        join         = "outer",    
-        merge        = "same",      
-        label        = None,        
-        index_unique = None         
-    )
+    if adata_gene_body is not None:
+        
+        adata_promoter = ad.concat(
+            [adata_promoter, adata_gene_body],
+            axis         = 1,           
+            join         = "outer",    
+            merge        = "same",      
+            label        = None,        
+            index_unique = None         
+        )
     
-    adata_df = adata.to_df().transpose()
-    adata_df[gene_key] = adata.var[gene_key]
+    adata_df = adata_promoter.to_df().transpose()
+    adata_df[gene_key] = adata_promoter.var[gene_key]
     
     gene_sums = adata_df.groupby(gene_key).sum(numeric_only=True)
     gene_sums_sparse= sparse.csr_matrix(gene_sums.transpose().values)  
     
-    return ad.AnnData(X=gene_sums_sparse, obs=pd.DataFrame(index=gene_sums.columns), var = pd.DataFrame(index=gene_sums.index))
+    adata = ad.AnnData(X=gene_sums_sparse, obs=pd.DataFrame(index=gene_sums.columns), var = pd.DataFrame(index=gene_sums.index))
+    
+    return adata
 
 
 # ---------------------------------------------Gene filtering Functions------------------------------------------------
@@ -337,19 +339,21 @@ def MI_Matrix_MIinfoClassif( adata_rna, adata_atac, *, n_neighbors=3, n_jobs=1, 
     # Use KNN entropy estimator which works in Euclidean space. Every variable in feature should be on the 
     # same scale to avoid large numeric ranges dominate the neighbor
     # This can be done by give every gene x-mu/sigma (so variance is 1)
-    scaler = StandardScaler()              # mean‑0, std‑1 per column
-    rna_expression_scaled = scaler.fit_transform(rna_expression)     # X is (n_samples, n_features)   
-    atac_access_scaled = scaler.fit_transform(atac_access)     # X is (n_samples, n_features)   
+    #scaler = StandardScaler()              # mean‑0, std‑1 per column
+    #rna_expression_scaled = scaler.fit_transform(rna_expression)     # X is (n_samples, n_features)   
+    #atac_access_scaled = scaler.fit_transform(atac_access)     # X is (n_samples, n_features)   
      
-    atac_access_scaled = (atac_access_scaled > 0).astype(int) 
+    atac_access = (atac_access > 0).astype(int) 
 
     # helper function to compute mutual information
     def _mi_info(j) -> np.ndarray:
-        y = atac_access_scaled[:, j]
-        return (mutual_info_classif(rna_expression_scaled, y, n_neighbors=n_neighbors, n_jobs=n_jobs, random_state=random_state, discrete_features=False))
+        y = atac_access[:, j]
+        if (j+1)%10 == 0:
+            print(f"Calculating mutual information for ATAC peak {j+1}/{atac_access.shape[1]}")        
+        return (mutual_info_classif(rna_expression, y, n_neighbors=n_neighbors, n_jobs=n_jobs, random_state=random_state, discrete_features=False))
         
     # parallelize
-    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(atac_access_scaled.shape[1]))
+    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(rna_expression.shape[1]))
     
     mi_matrix = np.vstack(mi_list).T
                
@@ -377,18 +381,20 @@ def MI_Matrix_MIinfoRegression(adata_rna, adata_atac, *, n_neighbors=3, n_jobs=1
     # Use KNN entropy estimator which works in Euclidean space. Every variable in feature should be on the 
     # same scale to avoid large numeric ranges dominate the neighbor
     # This can be done by give every gene x-mu/sigma (so variance is 1)
-    scaler = StandardScaler()              # mean‑0, std‑1 per column
-    rna_expression_scaled = scaler.fit_transform(rna_expression)     # X is (n_samples, n_features)   
-    atac_access_scaled = scaler.fit_transform(atac_access)     # X is (n_samples, n_features)
+    #caler = StandardScaler()              # mean‑0, std‑1 per column
+    #rna_expression_scaled = scaler.fit_transform(rna_expression)     # X is (n_samples, n_features)   
+    #atac_access_scaled = scaler.fit_transform(atac_access)     # X is (n_samples, n_features)
      
      
     # helper function to compute mutual information
     def _mi_info(j) -> np.ndarray:
-        y = atac_access_scaled[:, j]
-        return (mutual_info_regression(rna_expression_scaled, y, n_neighbors=n_neighbors, n_jobs=n_jobs, random_state=random_state, discrete_features=False))
-        
+        y = atac_access[:, j]
+        if (j+1)%10 == 0:
+            print(f"Calculating mutual information for ATAC peak {j+1}/{atac_access.shape[1]}")
+        return (mutual_info_regression(rna_expression, y, n_neighbors=n_neighbors, n_jobs=n_jobs, random_state=random_state, discrete_features=False))
+         
     # parallelize
-    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(atac_access_scaled.shape[1]))
+    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(atac_access.shape[1]))
 
     
     mi_matrix = np.vstack(mi_list).T
@@ -398,37 +404,7 @@ def MI_Matrix_MIinfoRegression(adata_rna, adata_atac, *, n_neighbors=3, n_jobs=1
                 
     return mi_df
     
-    if adata_atac.n_obs != adata_rna.n_obs:
-        print("The two datasets do not have the same number of cells.")
-        return  # Exit the function early
-    
-    # convert rna and atac adata object to dataframe 
-    rna_expression = adata_rna.X.toarray()
-    atac_access = adata_atac.X.toarray() 
-    
-    
-    '''
-    # Use KNN entropy estimator which works in Euclidean space. Every variable in feature should be on the 
-    # same scale to avoid large numeric ranges dominate the neighbor
-    # This can be done by give every gene x-mu/sigma (so variance is 1)
-    scaler = StandardScaler()              # mean‑0, std‑1 per column
-    rna_expression_scaled = scaler.fit_transform(rna_expression)     # X is (n_samples, n_features)   
-    '''
-     
-    # helper function to compute mutual information
-    def _mi_info(j) -> np.ndarray:
-        y = atac_access[:, j]
-        return (mutual_info_regression(rna_expression, y, n_neighbors=n_neighbors, n_jobs=n_jobs, random_state=random_state, discrete_features=False))
-        
-    # parallelize
-    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(atac_access.shape[1]))
-    
-    mi_matrix = np.vstack(mi_list).T
-               
-    # convert to df  
-    mi_df = pd.DataFrame(mi_matrix, index=adata_atac.var_names, columns=adata_rna.var_names)
-                
-    return mi_df
+
 
 
 # Given the MI matrix, adjust the MI values by peak distance to target gene TSS

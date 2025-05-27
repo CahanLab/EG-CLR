@@ -12,7 +12,7 @@ from scipy import sparse
 import pybedtools
 import pickle
 import anndata as ad
-import pySingleCellNet as pySCN # pip install git+https://github.com/pcahan1/PySingleCellNet.
+#import pySingleCellNet as pySCN # pip install git+https://github.com/pcahan1/PySingleCellNet.
 import random
 random.seed(10)
 from sklearn.preprocessing import KBinsDiscretizer
