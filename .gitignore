@@ -8,4 +8,5 @@ ATAC-seq_preprocessing_R.Rprojfile.rds
 Test
 file.rds
 *.Rproj
-__pycache__/
+__pycache__
+*.pyc
