@@ -5,7 +5,7 @@
 .DS_Store
 AMULET-main
 ATAC-seq_preprocessing_R.Rprojfile.rds
-results
+Test/results
 file.rds
 *.Rproj
 __pycache__
