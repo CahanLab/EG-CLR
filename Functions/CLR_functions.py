@@ -353,9 +353,9 @@ def MI_Matrix_MIinfoClassif( adata_rna, adata_atac, *, n_neighbors=3, n_jobs=1, 
         return (mutual_info_classif(rna_expression, y, n_neighbors=n_neighbors, n_jobs=n_jobs, random_state=random_state, discrete_features=False))
         
     # parallelize
-    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(rna_expression.shape[1]))
+    mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(atac_access.shape[1]))
     
-    mi_matrix = np.vstack(mi_list).T
+    mi_matrix = np.vstack(mi_list)
                
     # convert to df  
     mi_df = pd.DataFrame(mi_matrix, index=adata_atac.var_names, columns=adata_rna.var_names)
@@ -397,14 +397,13 @@ def MI_Matrix_MIinfoRegression(adata_rna, adata_atac, *, n_neighbors=3, n_jobs=1
     mi_list = Parallel(n_jobs=n_jobs)(delayed(_mi_info)(j) for j in range(atac_access.shape[1]))
 
     
-    mi_matrix = np.vstack(mi_list).T
+    mi_matrix = np.vstack(mi_list)
                
     # convert to df  
     mi_df = pd.DataFrame(mi_matrix, index=adata_atac.var_names, columns=adata_rna.var_names)
                 
     return mi_df
     
-
 
 
 # Given the MI matrix, adjust the MI values by peak distance to target gene TSS
@@ -459,7 +458,7 @@ def CLR_Matrix(mi_matrix):
 def z_score_filter(CLR_matrix, zthre):
     
     # filter out all entries smaller than z-thre
-    result = CLR_matrix.applymap(lambda x: x if x > zthre else 0.0 )
+    result = CLR_matrix.map(lambda x: x if x > zthre else 0.0 )
         
     # drop any gene or peaks that has no association to ther peaks or genes
     result = result.loc[:,CLR_matrix.sum(axis=0) != 0]
@@ -469,7 +468,7 @@ def z_score_filter(CLR_matrix, zthre):
 
 
 # intesect two CLR matrixes 
-def intersect_chromsome_matrixes(CLR_1, CLR_2):
+def intersection_CLR(CLR_1, CLR_2):
     
     CLR_1 = CLR_1.sort_index(axis=0).sort_index(axis=1) 
     CLR_2 = CLR_2.sort_index(axis=0).sort_index(axis=1) 

@@ -4,8 +4,93 @@ from muon import atac as ac
 from muon import prot as pt
 import anndata as ad
 import random
+import numpy as np
 random.seed(10)
 import pybedtools
+
+
+# ---------------------------------------------Speed Test Functions------------------------------------------------
+
+
+def random_subset_adatas(adata1: ad.AnnData, adata2: ad.AnnData, n_cells: int, random_state: int | None = None, copy: bool = True ):
+
+    # sanity checks  
+    if adata1.n_obs != adata2.n_obs or not np.array_equal(
+        adata1.obs_names, adata2.obs_names
+    ):
+        raise ValueError("Both AnnData objects must share the same cells in the same order.")
+    if n_cells > adata1.n_obs:
+        raise ValueError(f"n_cells={n_cells} is greater than total cells ({adata1.n_obs}).")
+
+    # sampling  
+    rng = np.random.default_rng(random_state)
+    idx = rng.choice(adata1.n_obs, size=n_cells, replace=False)
+
+    ad1_sub = adata1[idx].copy() if copy else adata1[idx]
+    ad2_sub = adata2[idx].copy() if copy else adata2[idx]
+
+    return ad1_sub, ad2_sub
+
+# ---------------------------------------------Speed Test Functions------------------------------------------------
+
+
+
+
+# ---------------------------------------------Data Exploration Functions------------------------------------------------
+
+
+# Turn CLR matrix in to DF with 3 columns: Element, Value, Gene
+def convert_matrix_to_df(matrix):
+    
+    results = []
+
+    for i in range(matrix.shape[1]):
+        # Filter positive values and extract the column as Series
+        prediction_list = matrix[matrix.iloc[:, i] > 0.0].iloc[:, i].copy()
+        
+        # Get the name of the column
+        name = matrix.columns[i]
+        
+        # Append each (index, value, name) triplet as a dict
+        for idx, val in prediction_list.items():
+            results.append({'Element': idx, 'Value': val, 'Gene': name})
+
+    # Create final DataFrame
+    df_result = pd.DataFrame(results)
+
+    return df_result
+    
+
+def calculate_tss(prediction_df, adata):
+    
+    # extract gene coordinate
+    adata.var["Gene"] = adata.var_names
+    gene_coordinate = adata.var[["Gene", "Chromosome", "Start", "End"]]
+
+    # add gene coordinate to CRISPRi data
+    prediction_df_tss = (
+        prediction_df.merge(gene_coordinate[['Gene',"Start", "End"]],        
+            left_on='Gene',              
+            right_on='Gene',            
+            how='left',
+            validate="many_to_one")                  
+     )
+
+    # expand peak coordinate
+    prediction_df_tss[['Chr_peak', 'Start_peak', 'End_peak']] = prediction_df_tss['Element'].str.extract(r'(chr[^:]+):(\d+)-(\d+)')
+    prediction_df_tss['Start_peak'] = prediction_df_tss['Start_peak'].astype(int)
+    prediction_df_tss['End_peak'] = prediction_df_tss['End_peak'].astype(int)
+
+    # calcaulte tss (middle of gene coordiante to middle of peak coordinate)
+    prediction_df_tss["distance_to_tss"] = ((prediction_df_tss["Start"] + prediction_df_tss["End"]) // 2  
+                                            - (prediction_df_tss["Start_peak"] + prediction_df_tss["End_peak"] // 2)).abs()
+
+    return prediction_df_tss
+
+
+# ---------------------------------------------Data Exploration  Functions------------------------------------------------
+
+
 
 
 # ---------------------------------------------CRRSPRi Functions------------------------------------------------

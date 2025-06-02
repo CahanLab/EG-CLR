@@ -120,13 +120,13 @@ def df_gene_chromosome(adata):
 
 
 # write CLR matrixes into pickle file #
-def write_matrixes(file_name, matrixes):
+def write_matrix(file_name, matrixes):
     with open(f'{file_name}.pkl', 'wb') as f:
         pickle.dump(matrixes, f)
 
 
 # load CLR matrixes pickle file #
-def load_matrxies(file_name):
+def load_matrix(file_name):
     with open(file_name, 'rb') as file:
         matrixes = pickle.load(file)
     return matrixes
